@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PDF to HTML &amp; CSS Converter</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f6f5f1;--surface:#fff;--ink:#1d1d1b;--muted:#6b6a64;--line:#dcdad2;--accent:#c4501b;--accent-ink:#fff;--code:#14130f;--code-ink:#e9e6da}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15140f;--surface:#1e1d17;--ink:#efede4;--muted:#9a978b;--line:#34322a;--accent:#e8743a;--accent-ink:#1a0d05;--code:#0d0c09;--code-ink:#e9e6da}}
+:root[data-theme="dark"]{--bg:#15140f;--surface:#1e1d17;--ink:#efede4;--muted:#9a978b;--line:#34322a;--accent:#e8743a;--accent-ink:#1a0d05;--code:#0d0c09;--code-ink:#e9e6da}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Georgia,"Times New Roman",serif}
+main{max-width:980px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:clamp(28px,5vw,44px);line-height:1.05;margin:0 0 8px;letter-spacing:-.02em}
+h1 em{color:var(--accent);font-style:italic}
+.sub{color:var(--muted);margin:0 0 24px;font-family:system-ui,sans-serif;font-size:15px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:34px 16px;text-align:center;cursor:pointer;font-family:system-ui,sans-serif;color:var(--muted);transition:.15s}
+.drop.over,.drop:hover{border-color:var(--accent);color:var(--ink)}
+.drop b{display:block;color:var(--ink);font-size:17px;margin-bottom:4px}
+.opts{display:flex;flex-wrap:wrap;gap:12px 22px;margin-top:16px;font-family:system-ui,sans-serif;font-size:14px;align-items:center}
+.opts label{display:flex;gap:6px;align-items:center;cursor:pointer}
+select,input[type=number]{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+button{font:600 14px system-ui,sans-serif;padding:9px 14px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button:disabled{opacity:.45;cursor:not-allowed}
+#status{font-family:system-ui,sans-serif;font-size:14px;color:var(--muted);margin:10px 0 0;min-height:20px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.tabs button[aria-selected=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+iframe{width:100%;height:70vh;min-height:420px;border:1px solid var(--line);border-radius:10px;background:#fff}
+pre{margin:0;background:var(--code);color:var(--code-ink);border-radius:10px;padding:14px;overflow:auto;max-height:70vh;font:12.5px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>PDF to <em>HTML &amp; CSS</em></h1>
+<p class="sub">Upload a PDF and get clean, editable HTML and CSS. Everything runs in your browser; your file is never uploaded.</p>
+
+<div class="card">
+  <div class="drop" id="drop" tabindex="0" role="button"><b>Drop a PDF here or click to choose</b><span id="fname">Text-based PDFs work best (scanned images have no text to extract)</span></div>
+  <input type="file" id="file" accept="application/pdf,.pdf" hidden>
+  <div class="opts">
+    <label>Mode
+      <select id="mode">
+        <option value="layout">Exact layout (positioned text)</option>
+        <option value="flow">Flowing document (headings &amp; paragraphs)</option>
+      </select>
+    </label>
+    <label>Pages <input type="number" id="maxp" min="1" value="50" style="width:70px"> max</label>
+    <button class="primary" id="go" disabled>Convert</button>
+  </div>
+  <p id="status"></p>
+</div>
+
+<div class="card" id="out" hidden>
+  <div class="bar">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-t="preview" aria-selected="true">Preview</button>
+      <button role="tab" data-t="html" aria-selected="false">HTML</button>
+      <button role="tab" data-t="css" aria-selected="false">CSS</button>
+    </div>
+    <div class="actions">
+      <button id="cpy">Copy</button>
+      <button id="dlhtml" class="primary">Download .html</button>
+      <button id="dlcss">Download CSS</button>
+    </div>
+  </div>
+  <iframe id="prev" sandbox title="Preview"></iframe>
+  <pre id="codeview" hidden></pre>
+</div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script>
+(function(){
+  var $=function(i){return document.getElementById(i)};
+  var file=null,res={html:'',css:'',doc:''},tab='preview',baseName='document';
+  if(window.pdfjsLib){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}
+  function status(t){$('status').textContent=t}
+  function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+  function r(n){return Math.round(n*100)/100}
+
+  /* ---------- file picking ---------- */
+  var drop=$('drop');
+  function setFile(f){
+    if(!f||!/pdf$/i.test(f.type||f.name)&&!/\.pdf$/i.test(f.name)){status('Please choose a PDF file.');return}
+    file=f;baseName=f.name.replace(/\.pdf$/i,'')||'document';
+    $('fname').textContent=f.name+' ('+Math.round(f.size/1024)+' KB)';
+    $('go').disabled=false;status('');
+  }
+  drop.onclick=function(){$('file').click()};
+  drop.onkeydown=function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();$('file').click()}};
+  $('file').onchange=function(e){setFile(e.target.files[0])};
+  ['dragover','dragenter'].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.add('over')})});
+  ['dragleave','drop'].forEach(function(ev){drop.addEventListener(ev,function(){drop.classList.remove('over')})});
+  drop.addEventListener('drop',function(e){e.preventDefault();setFile(e.dataTransfer.files[0])});
+
+  /* ---------- conversion ---------- */
+  $('go').onclick=async function(){
+    if(!file)return;
+    if(!window.pdfjsLib){status('PDF engine failed to load. Check your connection and reload.');return}
+    $('go').disabled=true;status('Reading PDF…');
+    try{
+      var buf=await file.arrayBuffer();
+      var pdf=await pdfjsLib.getDocument({data:buf}).promise;
+      var n=Math.min(pdf.numPages,Math.max(1,parseInt($('maxp').value)||50));
+      var pages=[];
+      for(var i=1;i<=n;i++){
+        status('Extracting page '+i+' of '+n+'…');
+        var pg=await pdf.getPage(i),vp=pg.getViewport({scale:1}),tc=await pg.getTextContent();
+        pages.push({vp:vp,tc:tc});
+      }
+      var out=$('mode').value==='layout'?buildLayout(pages):buildFlow(pages);
+      res.html=out.html;res.css=out.css;
+      res.doc='<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>'+esc(baseName)+'<'+'/title>\n<style>\n'+out.css+'\n<'+'/style>\n<'+'/head>\n<body>\n'+out.html+'\n<'+'/body>\n<'+'/html>\n';
+      $('out').hidden=false;show('preview');
+      status('Done: '+n+' page'+(n>1?'s':'')+(pdf.numPages>n?' (of '+pdf.numPages+')':'')+' converted.');
+    }catch(err){
+      console.error(err);status('Could not convert this PDF: '+(err&&err.message?err.message:err));
+    }
+    $('go').disabled=false;
+  };
+
+  function fontOf(tc,it){var s=tc.styles[it.fontName];return s&&s.fontFamily?s.fontFamily:'sans-serif'}
+  function fam(f){return /mono|courier/i.test(f)?'"Courier New",monospace':/serif/i.test(f)&&!/sans/i.test(f)?'Georgia,serif':'Arial,Helvetica,sans-serif'}
+
+  /* exact layout: absolutely positioned spans */
+  function buildLayout(pages){
+    var css=['* { box-sizing: border-box; }','body { margin: 0; background: #888; padding: 20px 0; }',
+      '.page { position: relative; margin: 0 auto 20px; background: #fff; overflow: hidden; }',
+      '.t { position: absolute; white-space: pre; line-height: 1; color: #000; }'];
+    var fs={},fm={},html=[];
+    pages.forEach(function(p,pi){
+      var W=r(p.vp.width),H=r(p.vp.height),pid='p'+(pi+1);
+      css.push('#'+pid+' { width: '+W+'px; height: '+H+'px; }');
+      var h=['<div class="page" id="'+pid+'">'];
+      p.tc.items.forEach(function(it,k){
+        if(!it.str||!it.str.trim())return;
+        var t=it.transform,size=r(Math.hypot(t[0],t[1])),x=t[4],y=H-t[5];
+        var f=fam(fontOf(p.tc,it)),fk=fm[f]||(fm[f]='f'+(Object.keys(fm).length+1));
+        var sk=fs[size]||(fs[size]='s'+String(size).replace('.','_'));
+        var id=pid+'t'+k;
+        css.push('#'+id+' { left: '+r(x)+'px; top: '+r(y-size*.88)+'px; }');
+        h.push('  <span class="t '+sk+' '+fk+'" id="'+id+'">'+esc(it.str)+'</span>');
+      });
+      h.push('</div>');html.push(h.join('\n'));
+    });
+    Object.keys(fs).forEach(function(s){css.push('.'+fs[s]+' { font-size: '+s+'px; }')});
+    Object.keys(fm).forEach(function(f){css.push('.'+fm[f]+' { font-family: '+f+'; }')});
+    return{html:html.join('\n'),css:css.join('\n')};
+  }
+
+  /* flowing: group into lines, paragraphs, headings */
+  function buildFlow(pages){
+    var all=[],sizeCount={};
+    var pageLines=pages.map(function(p){
+      var items=p.tc.items.filter(function(i){return i.str&&i.str.trim()}).map(function(i){
+        var t=i.transform,s=Math.hypot(t[0],t[1]);
+        return{s:i.str,x:t[4],y:t[5],size:s,w:i.width,bold:/bold|black|heavy/i.test(i.fontName+' '+(p.tc.styles[i.fontName]||{}).fontFamily)};
+      });
+      items.sort(function(a,b){return Math.abs(a.y-b.y)>2?b.y-a.y:a.x-b.x});
+      var lines=[];
+      items.forEach(function(it){
+        var L=lines[lines.length-1];
+        if(L&&Math.abs(L.y-it.y)<=Math.max(2,it.size*.4)){
+          var gap=it.x-L.endX;
+          L.text+=(gap>it.size*.15&&!/\s$/.test(L.text)?' ':'')+it.s;L.endX=it.x+it.w;L.size=Math.max(L.size,it.size);
+        }else lines.push({text:it.s,y:it.y,x:it.x,endX:it.x+it.w,size:it.size,bold:it.bold});
+        var k=Math.round(it.size);sizeCount[k]=(sizeCount[k]||0)+it.s.length;
+      });
+      return lines;
+    });
+    var body=12,best=0;Object.keys(sizeCount).forEach(function(k){if(sizeCount[k]>best){best=sizeCount[k];body=+k}});
+    var html=[];
+    pageLines.forEach(function(lines,pi){
+      var h=['<section class="page" id="page-'+(pi+1)+'">'],para=null,prev=null;
+      function flush(){if(para){h.push('  <p>'+esc(para)+'</p>');para=null}}
+      lines.forEach(function(L){
+        var ratio=L.size/body,tag=ratio>=1.7?'h1':ratio>=1.3?'h2':ratio>=1.12?'h3':'';
+        var t=L.text.trim();
+        if(tag){flush();h.push('  <'+tag+'>'+esc(t)+'</'+tag+'>');prev=null;return}
+        var newPara=!para||(prev&&(prev.y-L.y)>L.size*1.7)||/^([•●▪\-–*]|\d+[.)])\s/.test(t);
+        if(newPara){flush();para=t}else para+=(/-$/.test(para)?'':' ')+t;
+        prev=L;
+      });
+      flush();h.push('</section>');html.push(h.join('\n'));
+    });
+    var css=['* { box-sizing: border-box; }',
+      'body { margin: 0; background: #f4f4f1; color: #222; font: 17px/1.65 Georgia, "Times New Roman", serif; }',
+      '.page { max-width: 760px; margin: 24px auto; padding: 48px 56px; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.12); }',
+      'h1, h2, h3 { font-family: Arial, Helvetica, sans-serif; line-height: 1.2; margin: 1.4em 0 .5em; }',
+      'h1 { font-size: 2em; } h2 { font-size: 1.5em; } h3 { font-size: 1.2em; }',
+      'p { margin: 0 0 1em; }',
+      '@media (max-width: 640px) { .page { padding: 24px 18px; margin: 0; box-shadow: none; } }'];
+    return{html:html.join('\n'),css:css.join('\n')};
+  }
+
+  /* ---------- output UI ---------- */
+  function show(t){
+    tab=t;
+    document.querySelectorAll('.tabs button').forEach(function(b){b.setAttribute('aria-selected',b.dataset.t===t)});
+    $('prev').hidden=t!=='preview';$('codeview').hidden=t==='preview';
+    if(t==='preview')$('prev').srcdoc=res.doc;
+    else $('codeview').textContent=t==='html'?res.html:res.css;
+    $('cpy').textContent=t==='preview'?'Copy full page':'Copy '+t.toUpperCase();
+  }
+  document.querySelectorAll('.tabs button').forEach(function(b){b.onclick=function(){show(b.dataset.t)}});
+
+  async function copy(text,btn){
+    var old=btn.textContent;
+    try{await navigator.clipboard.writeText(text)}catch(e){
+      var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();
+      try{document.execCommand('copy')}catch(_){}ta.remove();
+    }
+    btn.textContent='Copied';setTimeout(function(){btn.textContent=old},1200);
+  }
+  $('cpy').onclick=function(){copy(tab==='html'?res.html:tab==='css'?res.css:res.doc,$('cpy'))};
+
+  var dl=null;
+  try{if(window.claude&&claude.use){claude.use('downloads').then(function(d){dl=d;if(!d){$('dlhtml').disabled=$('dlcss').disabled=true;$('dlhtml').title='Downloads unavailable here, use Copy instead'}}).catch(function(){})}}catch(e){}
+  async function save(name,data){
+    if(dl){try{await dl.save({filename:name,data:data})}catch(e){if(e&&e.code!=='declined')status('Download unavailable, use Copy instead.')}return}
+    var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data]));a.download=name;document.body.appendChild(a);a.click();a.remove();
+  }
+  $('dlhtml').onclick=function(){save(baseName+'.html',res.doc)};
+  $('dlcss').onclick=function(){save(baseName+'-style.txt',res.css)};
+})();
+</script>
+</body>
+</html>
